@@ -7,6 +7,10 @@ const wss = new WebSocket.Server({ port: PORT });
 const rooms = new Map();
 
 const MAX_CUSTOM_COMBOS = 3;
+const LAST_BUS_MINUTES = 10;
+const MAX_ACTIVITY_LOGS = 50;
+const PHASE_NORMAL = 'normal';
+const PHASE_LAST_BUS = 'last_bus';
 
 const MOCK_USERS = [
   { id: 'mock_1', name: '小明' },
@@ -90,15 +94,22 @@ function createRoom(ownerId, ownerName, config) {
     ? DEFAULT_COMBOS.filter(c => c.tags.some(t => config.selectedTags.includes(t)))
     : [...DEFAULT_COMBOS];
 
+  const deadline = config.deadline || now + 3600000;
+  const timeLeft = deadline - now;
+  const initialPhase = timeLeft <= LAST_BUS_MINUTES * 60 * 1000 ? PHASE_LAST_BUS : PHASE_NORMAL;
+
   const room = {
     id: roomId,
     ownerId,
     ownerName,
     config: {
-      deadline: config.deadline || now + 3600000,
+      deadline,
       selectedTags: config.selectedTags || [],
       maxCustomCombos: MAX_CUSTOM_COMBOS,
+      lastBusMinutes: LAST_BUS_MINUTES,
     },
+    phase: initialPhase,
+    phaseTimer: null,
     combos: combos.map(c => ({
       ...c,
       upVotes: 0,
@@ -106,11 +117,13 @@ function createRoom(ownerId, ownerName, config) {
       score: 0,
       recentDownVotes: [],
       inWarning: false,
-      voters: { up: new Set(), down: new Set() }
+      voters: { up: new Set(), down: new Set() },
+      voteDetails: [],
     })),
     customComboCount: 0,
     users: new Map(),
     votes: [],
+    activities: [],
     isLocked: false,
     createdAt: now,
     mockEnabled: config.mockEnabled !== false,
@@ -132,6 +145,8 @@ function createRoom(ownerId, ownerName, config) {
   if (room.mockEnabled) {
     startMockVoting(room);
   }
+
+  startPhaseTimer(room);
 
   return room;
 }
@@ -187,6 +202,66 @@ function removeCustomComboFromRoom(room, comboId) {
   return { success: true };
 }
 
+function checkPhase(room) {
+  const now = Date.now();
+  const timeLeft = room.config.deadline - now;
+  const shouldBeLastBus = timeLeft <= LAST_BUS_MINUTES * 60 * 1000 && timeLeft > 0 && !room.isLocked;
+  const newPhase = shouldBeLastBus ? PHASE_LAST_BUS : PHASE_NORMAL;
+  
+  if (newPhase !== room.phase && !room.isLocked) {
+    room.phase = newPhase;
+    broadcastToRoom(room, {
+      type: 'phase_change',
+      data: {
+        phase: room.phase,
+        deadline: room.config.deadline,
+        timeLeft: Math.max(0, room.config.deadline - Date.now()),
+      }
+    });
+  }
+  
+  return room.phase;
+}
+
+function startPhaseTimer(room) {
+  if (room.phaseTimer) {
+    clearInterval(room.phaseTimer);
+  }
+  room.phaseTimer = setInterval(() => {
+    checkPhase(room);
+    if (room.isLocked || Date.now() > room.config.deadline + 60000) {
+      clearInterval(room.phaseTimer);
+      room.phaseTimer = null;
+    }
+  }, 1000);
+}
+
+function addActivity(room, activity) {
+  const activityItem = {
+    id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: Date.now(),
+    ...activity,
+  };
+  
+  room.activities.unshift(activityItem);
+  
+  if (room.activities.length > MAX_ACTIVITY_LOGS) {
+    room.activities = room.activities.slice(0, MAX_ACTIVITY_LOGS);
+  }
+  
+  broadcastToRoom(room, {
+    type: 'activity_item',
+    data: activityItem,
+  });
+}
+
+function getVoteWeight(room, voteType) {
+  if (room.phase === PHASE_LAST_BUS && voteType === 'up') {
+    return 2;
+  }
+  return 1;
+}
+
 function addUserToRoom(room, userId, userName) {
   if (!room.users.has(userId)) {
     room.users.set(userId, {
@@ -205,6 +280,7 @@ function getRoomState(room) {
     ownerId: room.ownerId,
     ownerName: room.ownerName,
     config: room.config,
+    phase: room.phase,
     combos: room.combos.map(c => ({
       id: c.id,
       cake: c.cake,
@@ -220,6 +296,7 @@ function getRoomState(room) {
       inWarning: c.inWarning,
     })),
     customComboCount: room.customComboCount,
+    activities: room.activities,
     users: Array.from(room.users.values()).map(u => ({
       id: u.id,
       name: u.name,
@@ -250,22 +327,33 @@ function handleVote(room, userId, comboId, voteType) {
 
   const prevUp = combo.voters.up.has(userId);
   const prevDown = combo.voters.down.has(userId);
+  const prevVoteType = prevUp ? 'up' : (prevDown ? 'down' : null);
+  
+  if (voteType === prevVoteType) return;
+
+  const currentPhase = room.phase;
+  let scoreChange = 0;
+
+  if (prevVoteType === 'up') {
+    const prevWeight = getVoteWeight(room, 'up');
+    scoreChange -= prevWeight;
+    combo.voters.up.delete(userId);
+    combo.upVotes--;
+  }
+  if (prevVoteType === 'down') {
+    scoreChange += 1;
+    combo.voters.down.delete(userId);
+    combo.downVotes--;
+    combo.recentDownVotes = combo.recentDownVotes.filter(v => v.userId !== userId);
+  }
 
   if (voteType === 'up') {
-    if (prevUp) return;
-    if (prevDown) {
-      combo.voters.down.delete(userId);
-      combo.downVotes--;
-      combo.recentDownVotes = combo.recentDownVotes.filter(v => v.userId !== userId);
-    }
+    const weight = getVoteWeight(room, 'up');
+    scoreChange += weight;
     combo.voters.up.add(userId);
     combo.upVotes++;
   } else if (voteType === 'down') {
-    if (prevDown) return;
-    if (prevUp) {
-      combo.voters.up.delete(userId);
-      combo.upVotes--;
-    }
+    scoreChange -= 1;
     combo.voters.down.add(userId);
     combo.downVotes++;
     
@@ -276,23 +364,24 @@ function handleVote(room, userId, comboId, voteType) {
     if (combo.recentDownVotes.length >= 3) {
       combo.inWarning = true;
     }
-  } else if (voteType === 'cancel') {
-    if (prevUp) {
-      combo.voters.up.delete(userId);
-      combo.upVotes--;
-    }
-    if (prevDown) {
-      combo.voters.down.delete(userId);
-      combo.downVotes--;
-      combo.recentDownVotes = combo.recentDownVotes.filter(v => v.userId !== userId);
-    }
   }
 
-  combo.score = combo.upVotes - combo.downVotes;
+  combo.score += scoreChange;
 
   if (combo.recentDownVotes.length < 3) {
     combo.inWarning = false;
   }
+
+  const voteDetail = {
+    userId,
+    userName: user.name,
+    voteType,
+    phase: currentPhase,
+    weight: voteType !== 'cancel' ? getVoteWeight(room, voteType) : 0,
+    scoreChange,
+    timestamp: Date.now(),
+  };
+  combo.voteDetails.push(voteDetail);
 
   room.votes.push({
     id: uuidv4(),
@@ -300,8 +389,22 @@ function handleVote(room, userId, comboId, voteType) {
     userName: user.name,
     comboId,
     voteType,
+    phase: currentPhase,
     timestamp: Date.now(),
   });
+
+  if (voteType !== 'cancel' || prevVoteType) {
+    addActivity(room, {
+      userId,
+      userName: user.name,
+      type: voteType === 'cancel' ? 'cancel' : voteType,
+      comboId,
+      comboName: `${combo.cake} + ${combo.flower}`,
+      phase: currentPhase,
+      weight: voteType !== 'cancel' ? getVoteWeight(room, voteType) : 0,
+      scoreChange,
+    });
+  }
 
   broadcastToRoom(room, {
     type: 'vote_update',
@@ -315,6 +418,8 @@ function handleVote(room, userId, comboId, voteType) {
       },
       voter: { id: userId, name: user.name },
       voteType,
+      phase: currentPhase,
+      scoreChange,
     }
   });
 }
@@ -322,6 +427,11 @@ function handleVote(room, userId, comboId, voteType) {
 function lockRoom(room, userId) {
   if (room.ownerId !== userId) return false;
   room.isLocked = true;
+  
+  if (room.phaseTimer) {
+    clearInterval(room.phaseTimer);
+    room.phaseTimer = null;
+  }
   
   const sortedCombos = [...room.combos].sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;

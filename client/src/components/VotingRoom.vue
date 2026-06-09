@@ -18,6 +18,17 @@
       </div>
     </header>
 
+    <div v-if="roomState && roomPhase === 'last_bus' && !roomState.isLocked" class="last-bus-banner">
+      <div class="banner-content">
+        <span class="bus-icon">🚌</span>
+        <span class="banner-text">
+          <strong>末班车模式！</strong>
+          距截止还剩 <span class="countdown">{{ formatTime(remainingTime) }}</span>
+          点赞权重 ×2
+        </span>
+      </div>
+    </div>
+
     <div v-if="roomState" class="room-content">
       <div class="room-meta">
         <div class="meta-item">
@@ -69,6 +80,8 @@
         @close="showPoster = false"
       />
 
+      <ActivityPanel :activities="activities" />
+
       <div v-if="showAddModal" class="modal-overlay" @click.self="showAddModal = false">
         <div class="modal-content">
           <div class="modal-header">
@@ -110,13 +123,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import ComboCard from './ComboCard.vue'
 import Leaderboard from './Leaderboard.vue'
 import WarningZone from './WarningZone.vue'
 import SharePoster from './SharePoster.vue'
 import CustomComboForm from './CustomComboForm.vue'
+import ActivityPanel from './ActivityPanel.vue'
 
 const props = defineProps({
   roomId: String,
@@ -141,6 +155,8 @@ const adding = ref(false)
 const addError = ref('')
 const toastMessage = ref('')
 const toastType = ref('success')
+const roomPhase = ref('normal')
+const activities = ref([])
 
 let timerInterval = null
 let toastTimer = null
@@ -259,12 +275,24 @@ function processMessage(msg) {
         currentUserId.value = data.userId
         localStorage.setItem('vote_user_id', data.userId)
       }
+      if (data.state.phase) {
+        roomPhase.value = data.state.phase
+      }
+      if (data.state.activities) {
+        activities.value = data.state.activities
+      }
       hasJoined.value = true
       updateRemainingTime()
       break
 
     case 'state_update':
       roomState.value = data
+      if (data.phase) {
+        roomPhase.value = data.phase
+      }
+      if (data.activities) {
+        activities.value = data.activities
+      }
       updateRemainingTime()
       break
 
@@ -290,6 +318,20 @@ function processMessage(msg) {
       adding.value = false
       showAddModal.value = false
       showToast('私房组合添加成功！', 'success')
+      break
+
+    case 'phase_change':
+      roomPhase.value = data.phase
+      if (data.phase === 'last_bus') {
+        showToast('🚌 末班车模式开启！点赞权重×2', 'success')
+      }
+      break
+
+    case 'activity_item':
+      activities.value.unshift(data)
+      if (activities.value.length > 50) {
+        activities.value = activities.value.slice(0, 50)
+      }
       break
 
     case 'user_joined':
@@ -464,6 +506,47 @@ onUnmounted(() => {
   animation: pulse 0.8s ease-in-out infinite;
 }
 
+.last-bus-banner {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);
+  color: white;
+  padding: 12px 20px;
+  text-align: center;
+  animation: pulseBanner 2s ease-in-out infinite;
+  position: sticky;
+  top: 68px;
+  z-index: 99;
+}
+
+.banner-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.bus-icon {
+  font-size: 24px;
+  animation: bounce 1s ease-in-out infinite;
+}
+
+.banner-text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.banner-text strong {
+  font-weight: 700;
+}
+
+.countdown {
+  font-weight: 700;
+  font-size: 16px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  margin: 0 4px;
+}
+
 .room-content {
   padding: 16px;
   max-width: 800px;
@@ -574,6 +657,16 @@ onUnmounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes pulseBanner {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
 }
 
 .modal-overlay {
@@ -739,6 +832,23 @@ onUnmounted(() => {
   
   .header-left, .header-right {
     width: 80px;
+  }
+  
+  .last-bus-banner {
+    top: 60px;
+    padding: 10px 16px;
+  }
+  
+  .banner-text {
+    font-size: 12px;
+  }
+  
+  .countdown {
+    font-size: 14px;
+  }
+  
+  .bus-icon {
+    font-size: 20px;
   }
   
   .combos-grid {
