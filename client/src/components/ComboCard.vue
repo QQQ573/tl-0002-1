@@ -1,5 +1,7 @@
 <template>
-  <div class="combo-card" :class="{ warning: combo.inWarning, disabled: disabled }">
+  <div class="combo-card" :class="{ warning: combo.inWarning, disabled: disabled, custom: combo.isCustom }">
+    <div v-if="combo.isCustom" class="custom-badge">私房</div>
+    
     <div class="card-header">
       <span class="combo-emoji">{{ combo.cakeEmoji }}</span>
       <span class="plus">+</span>
@@ -14,6 +16,11 @@
 
     <div class="combo-tags">
       <span v-for="tag in combo.tags" :key="tag" class="tag">{{ tag }}</span>
+    </div>
+
+    <div class="price-row">
+      <span class="price-label">参考价</span>
+      <span class="price-value">¥{{ combo.price }}</span>
     </div>
 
     <div class="vote-stats">
@@ -107,6 +114,24 @@ function handleVote(type) {
   opacity: 0.7;
 }
 
+.combo-card.custom {
+  background: linear-gradient(135deg, #fff9f0 0%, #fff0e0 100%);
+  border: 2px dashed #ffb366;
+}
+
+.custom-badge {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  background: linear-gradient(135deg, #ff9933 0%, #ff6600 100%);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 15px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(255, 153, 51, 0.4);
+}
+
 .card-header {
   display: flex;
   align-items: center;
@@ -146,7 +171,7 @@ function handleVote(type) {
   display: flex;
   justify-content: center;
   gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
 }
 
@@ -156,6 +181,28 @@ function handleVote(type) {
   background: var(--bg);
   color: var(--text-light);
   border-radius: 10px;
+}
+
+.price-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 12px;
+  background: white;
+  border-radius: 10px;
+}
+
+.price-label {
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.price-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary-dark);
 }
 
 .vote-stats {
@@ -252,6 +299,10 @@ function handleVote(type) {
   
   .cake-name, .flower-name {
     font-size: 14px;
+  }
+  
+  .price-value {
+    font-size: 18px;
   }
 }
 </style>

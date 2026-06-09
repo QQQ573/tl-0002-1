@@ -32,6 +32,10 @@
           <span class="meta-icon">🔒</span>
           <span>已锁定结果</span>
         </div>
+        <div v-if="isOwner && !roomState.isLocked" class="meta-item add-btn" @click="showAddModal = true">
+          <span class="meta-icon">➕</span>
+          <span>加私房组合 ({{ customComboCount }}/3)</span>
+        </div>
       </div>
 
       <Leaderboard :combos="rankedCombos" />
@@ -64,6 +68,37 @@
         :room-id="roomId"
         @close="showPoster = false"
       />
+
+      <div v-if="showAddModal" class="modal-overlay" @click.self="showAddModal = false">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>添加私房组合</h3>
+            <button class="close-btn" @click="showAddModal = false">✕</button>
+          </div>
+          <p class="modal-desc">已添加 {{ customComboCount }}/3 组私房组合</p>
+          
+          <CustomComboForm ref="customFormRef" />
+          
+          <div v-if="addError" class="error-alert">
+            ⚠️ {{ addError }}
+          </div>
+          
+          <div class="modal-actions">
+            <button class="btn btn-cancel" @click="showAddModal = false">取消</button>
+            <button 
+              class="btn btn-confirm"
+              :disabled="!canAddCustom || adding"
+              @click="addCustomCombo"
+            >
+              {{ adding ? '添加中...' : '添加' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="toastMessage" class="toast" :class="{ success: toastType === 'success', error: toastType === 'error' }">
+        {{ toastMessage }}
+      </div>
     </div>
 
     <div v-else class="loading-state">
@@ -81,6 +116,7 @@ import ComboCard from './ComboCard.vue'
 import Leaderboard from './Leaderboard.vue'
 import WarningZone from './WarningZone.vue'
 import SharePoster from './SharePoster.vue'
+import CustomComboForm from './CustomComboForm.vue'
 
 const props = defineProps({
   roomId: String,
@@ -99,12 +135,22 @@ const userVotes = ref({})
 const remainingTime = ref(0)
 const currentUserId = ref('')
 const hasJoined = ref(false)
+const showAddModal = ref(false)
+const customFormRef = ref(null)
+const adding = ref(false)
+const addError = ref('')
+const toastMessage = ref('')
+const toastType = ref('success')
 
 let timerInterval = null
+let toastTimer = null
 
 const rankedCombos = computed(() => {
   if (!roomState.value) return []
-  return [...roomState.value.combos].sort((a, b) => b.score - a.score)
+  return [...roomState.value.combos].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score
+    return a.price - b.price
+  })
 })
 
 const warningCombos = computed(() => {
@@ -115,6 +161,16 @@ const warningCombos = computed(() => {
 const onlineUsers = computed(() => {
   if (!roomState.value) return 0
   return roomState.value.users.filter(u => u.online).length
+})
+
+const customComboCount = computed(() => {
+  if (!roomState.value) return 0
+  return roomState.value.combos.filter(c => c.isCustom).length
+})
+
+const canAddCustom = computed(() => {
+  if (!customFormRef.value) return false
+  return customFormRef.value.isValid() && customComboCount.value < 3
 })
 
 function getUserVote(comboId) {
@@ -154,6 +210,33 @@ function handleLeave() {
 function lockRoom() {
   send({ type: 'lock_room' })
   showPoster.value = true
+}
+
+function showToast(msg, type = 'success') {
+  toastMessage.value = msg
+  toastType.value = type
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastMessage.value = ''
+  }, 2500)
+}
+
+function addCustomCombo() {
+  if (!customFormRef.value || !customFormRef.value.isValid()) return
+  if (customComboCount.value >= 3) return
+  
+  adding.value = true
+  addError.value = ''
+  
+  const comboData = customFormRef.value.getData()
+  
+  const result = send({ type: 'add_custom_combo', combo: comboData })
+  
+  if (!result) {
+    addError.value = '网络连接失败，请稍后重试'
+    adding.value = false
+    return
+  }
 }
 
 function getWsUrl() {
@@ -197,6 +280,18 @@ function processMessage(msg) {
       }
       break
 
+    case 'combo_list_updated':
+      if (roomState.value) {
+        roomState.value.combos = data.combos
+      }
+      break
+
+    case 'custom_combo_added':
+      adding.value = false
+      showAddModal.value = false
+      showToast('私房组合添加成功！', 'success')
+      break
+
     case 'user_joined':
     case 'user_left':
       send({ type: 'get_state' })
@@ -206,6 +301,12 @@ function processMessage(msg) {
       if (roomState.value) {
         roomState.value.isLocked = true
       }
+      break
+
+    case 'error':
+      addError.value = data.message
+      adding.value = false
+      showToast(data.message, 'error')
       break
   }
 }
@@ -283,6 +384,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (timerInterval) clearInterval(timerInterval)
+  if (toastTimer) clearTimeout(toastTimer)
   close()
 })
 </script>
@@ -371,7 +473,7 @@ onUnmounted(() => {
 
 .room-meta {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   justify-content: center;
   margin-bottom: 20px;
   flex-wrap: wrap;
@@ -387,6 +489,19 @@ onUnmounted(() => {
   font-size: 14px;
   color: var(--text);
   box-shadow: 0 2px 8px rgba(255, 107, 139, 0.1);
+}
+
+.meta-item.add-btn {
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  color: white;
+  font-weight: 500;
+  transition: transform 0.2s;
+}
+
+.meta-item.add-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 107, 139, 0.3);
 }
 
 .meta-icon {
@@ -461,6 +576,154 @@ onUnmounted(() => {
   to { transform: rotate(360deg); }
 }
 
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+  animation: fadeIn 0.3s ease;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+  animation: slideUp 0.4s ease;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.modal-header h3 {
+  font-size: 20px;
+  color: var(--primary-dark);
+  margin: 0;
+}
+
+.close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--text-light);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.modal-desc {
+  font-size: 14px;
+  color: var(--text-light);
+  margin-bottom: 16px;
+}
+
+.error-alert {
+  background: #fff0f0;
+  border: 1px solid #ffcccc;
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #e74c3c;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.btn {
+  flex: 1;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-cancel {
+  background: var(--bg);
+  color: var(--text-light);
+  border: none;
+}
+
+.btn-cancel:hover {
+  background: var(--border);
+}
+
+.btn-confirm {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  color: white;
+  border: none;
+}
+
+.btn-confirm:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 107, 139, 0.4);
+}
+
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toast {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  border-radius: 25px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 300;
+  animation: slideDown 0.3s ease;
+}
+
+.toast.success {
+  background: var(--success);
+  color: white;
+}
+
+.toast.error {
+  background: var(--warning);
+  color: white;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 @media (max-width: 768px) {
   .room-header {
     padding: 10px 12px;
@@ -489,6 +752,10 @@ onUnmounted(() => {
   .meta-item {
     font-size: 12px;
     padding: 6px 12px;
+  }
+  
+  .modal-content {
+    padding: 20px 16px;
   }
 }
 

@@ -43,6 +43,34 @@
       </div>
 
       <div class="form-group">
+        <div class="section-header">
+          <label>私房组合（最多 3 组）</label>
+          <span class="count-badge">{{ customCombos.length }}/3</span>
+        </div>
+        <p class="hint">把你们逛店挑的私房搭配也加进来吧~</p>
+        
+        <div v-for="(combo, idx) in customCombos" :key="idx" class="custom-combo-item">
+          <div class="combo-item-header">
+            <span class="combo-index">私房组合 {{ idx + 1 }}</span>
+            <button class="remove-btn" @click="removeCustomCombo(idx)">✕ 删除</button>
+          </div>
+          <CustomComboForm 
+            :ref="el => setFormRef(el, idx)"
+            :initial-data="combo"
+            @change="onComboChange(idx, $event)"
+          />
+        </div>
+
+        <button 
+          v-if="customCombos.length < 3"
+          class="btn-add-custom"
+          @click="addCustomCombo"
+        >
+          + 添加私房组合
+        </button>
+      </div>
+
+      <div class="form-group">
         <label class="checkbox-label">
           <input 
             type="checkbox" 
@@ -54,7 +82,7 @@
 
       <button 
         class="btn btn-primary btn-large create-btn"
-        :disabled="!form.ownerName"
+        :disabled="!canSubmit"
         @click="createRoom"
       >
         🎉 创建投票房
@@ -64,7 +92,8 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
+import CustomComboForm from './CustomComboForm.vue'
 
 const emit = defineEmits(['created', 'back'])
 
@@ -77,6 +106,24 @@ const form = reactive({
   mockEnabled: true,
 })
 
+const customCombos = ref([])
+const formRefs = ref({})
+
+function setFormRef(el, idx) {
+  if (el) {
+    formRefs.value[idx] = el
+  }
+}
+
+const canSubmit = computed(() => {
+  if (!form.ownerName) return false
+  for (let i = 0; i < customCombos.value.length; i++) {
+    const ref = formRefs.value[i]
+    if (ref && !ref.isValid()) return false
+  }
+  return true
+})
+
 function toggleTag(tag) {
   const idx = form.selectedTags.indexOf(tag)
   if (idx > -1) {
@@ -86,8 +133,43 @@ function toggleTag(tag) {
   }
 }
 
+function addCustomCombo() {
+  if (customCombos.value.length < 3) {
+    customCombos.value.push({
+      cake: '',
+      flower: '',
+      cakeEmoji: '🍰',
+      flowerEmoji: '🌹',
+      tags: [],
+      price: '',
+    })
+  }
+}
+
+function removeCustomCombo(idx) {
+  customCombos.value.splice(idx, 1)
+  delete formRefs.value[idx]
+}
+
+function onComboChange(idx, data) {
+  customCombos.value[idx] = { ...customCombos.value[idx], ...data }
+}
+
+function collectCustomCombos() {
+  const result = []
+  for (let i = 0; i < customCombos.value.length; i++) {
+    const ref = formRefs.value[i]
+    if (ref && ref.isValid()) {
+      result.push(ref.getData())
+    }
+  }
+  return result
+}
+
 async function createRoom() {
   const ws = new WebSocket(getWsUrl())
+  
+  const customCombosData = collectCustomCombos()
   
   ws.onopen = () => {
     ws.send(JSON.stringify({
@@ -97,6 +179,7 @@ async function createRoom() {
         deadline: Date.now() + form.deadline,
         selectedTags: form.selectedTags,
         mockEnabled: form.mockEnabled,
+        customCombos: customCombosData,
       }
     }))
   }
@@ -125,9 +208,10 @@ function getWsUrl() {
 .create-room-page {
   min-height: 100vh;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 20px;
+  overflow-y: auto;
 }
 
 .create-card {
@@ -136,8 +220,9 @@ function getWsUrl() {
   border-radius: 20px;
   box-shadow: var(--shadow);
   width: 100%;
-  max-width: 420px;
+  max-width: 480px;
   animation: fadeIn 0.4s ease;
+  margin: 20px 0;
 }
 
 .create-card h2 {
@@ -175,6 +260,26 @@ function getWsUrl() {
   color: var(--text);
   margin-bottom: 8px;
   font-size: 14px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.section-header label {
+  margin-bottom: 0;
+}
+
+.count-badge {
+  font-size: 12px;
+  color: var(--primary);
+  background: var(--bg);
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-weight: 600;
 }
 
 .input-field {
@@ -218,6 +323,54 @@ function getWsUrl() {
   font-size: 12px;
   color: var(--text-light);
   margin-top: 8px;
+}
+
+.custom-combo-item {
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+}
+
+.combo-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.combo-index {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
+.remove-btn {
+  background: none;
+  color: var(--warning);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.remove-btn:hover {
+  text-decoration: underline;
+}
+
+.btn-add-custom {
+  width: 100%;
+  padding: 12px;
+  margin-top: 12px;
+  border: 2px dashed var(--primary);
+  background: var(--bg);
+  color: var(--primary-dark);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.btn-add-custom:hover {
+  background: var(--secondary);
 }
 
 .checkbox-label {
@@ -271,6 +424,7 @@ function getWsUrl() {
 @media (max-width: 480px) {
   .create-card {
     padding: 24px 20px;
+    max-width: 100%;
   }
 }
 </style>

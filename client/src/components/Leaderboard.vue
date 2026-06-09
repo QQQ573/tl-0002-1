@@ -1,9 +1,28 @@
 <template>
   <div class="leaderboard">
-    <h3 class="board-title">🏆 实时得票榜</h3>
+    <div class="board-header">
+      <h3 class="board-title">🏆 实时得票榜</h3>
+      <div class="sort-tabs">
+        <button 
+          class="sort-tab" 
+          :class="{ active: sortMode === 'hot' }"
+          @click="sortMode = 'hot'"
+        >
+          🔥 热度
+        </button>
+        <button 
+          class="sort-tab" 
+          :class="{ active: sortMode === 'price' }"
+          @click="sortMode = 'price'"
+        >
+          💰 预算
+        </button>
+      </div>
+    </div>
+    
     <div class="board-list">
       <div 
-        v-for="(combo, index) in combos" 
+        v-for="(combo, index) in sortedCombos" 
         :key="combo.id"
         class="board-item"
         :class="`rank-${index + 1}`"
@@ -16,7 +35,10 @@
         </div>
         <div class="combo-info">
           <span class="combo-emoji">{{ combo.cakeEmoji }}{{ combo.flowerEmoji }}</span>
-          <span class="combo-text">{{ combo.cake }} + {{ combo.flower }}</span>
+          <div class="combo-text-wrap">
+            <span class="combo-text">{{ combo.cake }} + {{ combo.flower }}</span>
+            <span class="combo-price">¥{{ combo.price }}</span>
+          </div>
         </div>
         <div class="score-info">
           <span class="score" :class="{ positive: combo.score > 0, negative: combo.score < 0 }">
@@ -32,11 +54,30 @@
 </template>
 
 <script setup>
-defineProps({
+import { ref, computed } from 'vue'
+
+const props = defineProps({
   combos: {
     type: Array,
     default: () => []
   }
+})
+
+const sortMode = ref('hot')
+
+const sortedCombos = computed(() => {
+  const list = [...props.combos]
+  
+  if (sortMode.value === 'hot') {
+    list.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return a.price - b.price
+    })
+  } else {
+    list.sort((a, b) => a.price - b.price)
+  }
+  
+  return list
 })
 </script>
 
@@ -49,11 +90,39 @@ defineProps({
   animation: fadeIn 0.4s ease;
 }
 
+.board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
 .board-title {
   font-size: 18px;
   color: var(--primary-dark);
-  text-align: center;
-  margin-bottom: 16px;
+}
+
+.sort-tabs {
+  display: flex;
+  background: var(--bg);
+  border-radius: 20px;
+  padding: 3px;
+}
+
+.sort-tab {
+  padding: 6px 14px;
+  border-radius: 18px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-light);
+  transition: all 0.3s ease;
+}
+
+.sort-tab.active {
+  background: white;
+  color: var(--primary-dark);
+  box-shadow: 0 2px 6px rgba(255, 107, 139, 0.15);
 }
 
 .board-list {
@@ -110,10 +179,22 @@ defineProps({
   font-size: 20px;
 }
 
+.combo-text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .combo-text {
   font-size: 14px;
   font-weight: 500;
   color: var(--text);
+}
+
+.combo-price {
+  font-size: 12px;
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .score-info {
@@ -140,6 +221,12 @@ defineProps({
 }
 
 @media (max-width: 480px) {
+  .board-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  
   .board-item {
     padding: 10px 12px;
   }

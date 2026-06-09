@@ -6,6 +6,8 @@ const wss = new WebSocket.Server({ port: PORT });
 
 const rooms = new Map();
 
+const MAX_CUSTOM_COMBOS = 3;
+
 const MOCK_USERS = [
   { id: 'mock_1', name: '小明' },
   { id: 'mock_2', name: '小红' },
@@ -15,13 +17,70 @@ const MOCK_USERS = [
 ];
 
 const DEFAULT_COMBOS = [
-  { id: 'combo_1', cake: '草莓千层', flower: '红玫瑰', cakeEmoji: '🍰', flowerEmoji: '🌹', tags: ['经典', '浪漫'] },
-  { id: 'combo_2', cake: '黑森林', flower: '百合', cakeEmoji: '🍫', flowerEmoji: '💐', tags: ['优雅', '清新'] },
-  { id: 'combo_3', cake: '提拉米苏', flower: '郁金香', cakeEmoji: '☕', flowerEmoji: '🌷', tags: ['意式', '高贵'] },
-  { id: 'combo_4', cake: '芒果慕斯', flower: '向日葵', cakeEmoji: '🥭', flowerEmoji: '🌻', tags: ['阳光', '活力'] },
-  { id: 'combo_5', cake: '抹茶千层', flower: '康乃馨', cakeEmoji: '🍵', flowerEmoji: '🌸', tags: ['日式', '温馨'] },
-  { id: 'combo_6', cake: '芝士蛋糕', flower: '满天星', cakeEmoji: '🧀', flowerEmoji: '✨', tags: ['简约', '纯粹'] },
+  { id: 'combo_1', cake: '草莓千层', flower: '红玫瑰', cakeEmoji: '🍰', flowerEmoji: '🌹', tags: ['经典', '浪漫'], price: 299, isCustom: false },
+  { id: 'combo_2', cake: '黑森林', flower: '百合', cakeEmoji: '🍫', flowerEmoji: '💐', tags: ['优雅', '清新'], price: 259, isCustom: false },
+  { id: 'combo_3', cake: '提拉米苏', flower: '郁金香', cakeEmoji: '☕', flowerEmoji: '🌷', tags: ['意式', '高贵'], price: 329, isCustom: false },
+  { id: 'combo_4', cake: '芒果慕斯', flower: '向日葵', cakeEmoji: '🥭', flowerEmoji: '🌻', tags: ['阳光', '活力'], price: 239, isCustom: false },
+  { id: 'combo_5', cake: '抹茶千层', flower: '康乃馨', cakeEmoji: '🍵', flowerEmoji: '🌸', tags: ['日式', '温馨'], price: 269, isCustom: false },
+  { id: 'combo_6', cake: '芝士蛋糕', flower: '满天星', cakeEmoji: '🧀', flowerEmoji: '✨', tags: ['简约', '纯粹'], price: 219, isCustom: false },
 ];
+
+const CAKE_EMOJI_OPTIONS = ['🍰', '🍫', '☕', '🥭', '🍵', '🧀', '🎂', '🍮', '🍩', '🍪'];
+const FLOWER_EMOJI_OPTIONS = ['🌹', '💐', '🌷', '🌻', '🌸', '✨', '🌺', '💮', '🏵️', '🌼'];
+
+function validateComboInput(combo) {
+  const errors = [];
+  
+  if (!combo) {
+    return { valid: false, errors: ['组合数据不能为空'] };
+  }
+  
+  if (!combo.cake || typeof combo.cake !== 'string' || combo.cake.trim().length === 0) {
+    errors.push('蛋糕名称不能为空');
+  } else if (combo.cake.trim().length > 20) {
+    errors.push('蛋糕名称不能超过20个字符');
+  }
+  
+  if (!combo.flower || typeof combo.flower !== 'string' || combo.flower.trim().length === 0) {
+    errors.push('鲜花名称不能为空');
+  } else if (combo.flower.trim().length > 20) {
+    errors.push('鲜花名称不能超过20个字符');
+  }
+  
+  if (!combo.cakeEmoji || typeof combo.cakeEmoji !== 'string') {
+    errors.push('请选择蛋糕表情');
+  }
+  
+  if (!combo.flowerEmoji || typeof combo.flowerEmoji !== 'string') {
+    errors.push('请选择鲜花表情');
+  }
+  
+  if (!combo.tags || !Array.isArray(combo.tags) || combo.tags.length === 0) {
+    errors.push('请至少选择一个风格标签');
+  } else if (combo.tags.length > 3) {
+    errors.push('风格标签最多选择3个');
+  }
+  
+  if (combo.price === undefined || combo.price === null || isNaN(combo.price)) {
+    errors.push('预算价格不能为空');
+  } else if (typeof combo.price === 'string' && combo.price.trim() === '') {
+    errors.push('预算价格不能为空');
+  } else {
+    const priceNum = Number(combo.price);
+    if (isNaN(priceNum)) {
+      errors.push('预算价格必须是数字');
+    } else if (priceNum <= 0) {
+      errors.push('预算价格必须大于0');
+    } else if (priceNum > 9999) {
+      errors.push('预算价格不能超过9999元');
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
 
 function createRoom(ownerId, ownerName, config) {
   const roomId = uuidv4().slice(0, 8);
@@ -38,6 +97,7 @@ function createRoom(ownerId, ownerName, config) {
     config: {
       deadline: config.deadline || now + 3600000,
       selectedTags: config.selectedTags || [],
+      maxCustomCombos: MAX_CUSTOM_COMBOS,
     },
     combos: combos.map(c => ({
       ...c,
@@ -48,12 +108,23 @@ function createRoom(ownerId, ownerName, config) {
       inWarning: false,
       voters: { up: new Set(), down: new Set() }
     })),
+    customComboCount: 0,
     users: new Map(),
     votes: [],
     isLocked: false,
     createdAt: now,
     mockEnabled: config.mockEnabled !== false,
   };
+
+  if (config.customCombos && Array.isArray(config.customCombos) && config.customCombos.length > 0) {
+    const maxCustom = Math.min(config.customCombos.length, MAX_CUSTOM_COMBOS);
+    for (let i = 0; i < maxCustom; i++) {
+      const validation = validateComboInput(config.customCombos[i]);
+      if (validation.valid) {
+        addCustomComboToRoom(room, config.customCombos[i]);
+      }
+    }
+  }
 
   addUserToRoom(room, ownerId, ownerName);
   rooms.set(roomId, room);
@@ -63,6 +134,57 @@ function createRoom(ownerId, ownerName, config) {
   }
 
   return room;
+}
+
+function addCustomComboToRoom(room, comboInput) {
+  if (room.customComboCount >= MAX_CUSTOM_COMBOS) {
+    return { success: false, error: `最多只能添加${MAX_CUSTOM_COMBOS}组私房组合` };
+  }
+  
+  const validation = validateComboInput(comboInput);
+  if (!validation.valid) {
+    return { success: false, errors: validation.errors };
+  }
+  
+  const newCombo = {
+    id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    cake: comboInput.cake.trim(),
+    flower: comboInput.flower.trim(),
+    cakeEmoji: comboInput.cakeEmoji,
+    flowerEmoji: comboInput.flowerEmoji,
+    tags: comboInput.tags,
+    price: Math.round(Number(comboInput.price) * 100) / 100,
+    isCustom: true,
+    upVotes: 0,
+    downVotes: 0,
+    score: 0,
+    recentDownVotes: [],
+    inWarning: false,
+    voters: { up: new Set(), down: new Set() },
+    createdAt: Date.now(),
+  };
+  
+  room.combos.push(newCombo);
+  room.customComboCount++;
+  
+  return { success: true, combo: newCombo };
+}
+
+function removeCustomComboFromRoom(room, comboId) {
+  const comboIndex = room.combos.findIndex(c => c.id === comboId);
+  if (comboIndex === -1) {
+    return { success: false, error: '组合不存在' };
+  }
+  
+  const combo = room.combos[comboIndex];
+  if (!combo.isCustom) {
+    return { success: false, error: '只能删除私房组合' };
+  }
+  
+  room.combos.splice(comboIndex, 1);
+  room.customComboCount--;
+  
+  return { success: true };
 }
 
 function addUserToRoom(room, userId, userName) {
@@ -90,11 +212,14 @@ function getRoomState(room) {
       cakeEmoji: c.cakeEmoji,
       flowerEmoji: c.flowerEmoji,
       tags: c.tags,
+      price: c.price,
+      isCustom: c.isCustom || false,
       upVotes: c.upVotes,
       downVotes: c.downVotes,
       score: c.score,
       inWarning: c.inWarning,
     })),
+    customComboCount: room.customComboCount,
     users: Array.from(room.users.values()).map(u => ({
       id: u.id,
       name: u.name,
@@ -198,7 +323,10 @@ function lockRoom(room, userId) {
   if (room.ownerId !== userId) return false;
   room.isLocked = true;
   
-  const sortedCombos = [...room.combos].sort((a, b) => b.score - a.score);
+  const sortedCombos = [...room.combos].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.price - b.price;
+  });
   
   broadcastToRoom(room, {
     type: 'room_locked',
@@ -209,6 +337,7 @@ function lockRoom(room, userId) {
         id: c.id,
         cake: c.cake,
         flower: c.flower,
+        price: c.price,
         score: c.score,
         upVotes: c.upVotes,
         downVotes: c.downVotes,
@@ -323,6 +452,106 @@ wss.on('connection', (ws, req) => {
         case 'lock_room': {
           if (!currentRoom || !currentUser) return;
           lockRoom(currentRoom, currentUser.id);
+          break;
+        }
+
+        case 'add_custom_combo': {
+          if (!currentRoom || !currentUser) return;
+          
+          if (currentRoom.ownerId !== currentUser.id) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              data: { message: '只有发起人可以添加私房组合' }
+            }));
+            return;
+          }
+          
+          if (currentRoom.isLocked) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              data: { message: '投票已锁定，无法添加组合' }
+            }));
+            return;
+          }
+          
+          const result = addCustomComboToRoom(currentRoom, data.combo);
+          
+          if (result.success) {
+            ws.send(JSON.stringify({
+              type: 'custom_combo_added',
+              data: {
+                combo: {
+                  id: result.combo.id,
+                  cake: result.combo.cake,
+                  flower: result.combo.flower,
+                  cakeEmoji: result.combo.cakeEmoji,
+                  flowerEmoji: result.combo.flowerEmoji,
+                  tags: result.combo.tags,
+                  price: result.combo.price,
+                  isCustom: true,
+                  upVotes: 0,
+                  downVotes: 0,
+                  score: 0,
+                  inWarning: false,
+                },
+                customComboCount: currentRoom.customComboCount,
+              }
+            }));
+            
+            broadcastToRoom(currentRoom, {
+              type: 'combo_list_updated',
+              data: { combos: getRoomState(currentRoom).combos }
+            });
+          } else {
+            ws.send(JSON.stringify({
+              type: 'error',
+              data: { message: result.errors ? result.errors.join('；') : result.error }
+            }));
+          }
+          break;
+        }
+
+        case 'remove_custom_combo': {
+          if (!currentRoom || !currentUser) return;
+          
+          if (currentRoom.ownerId !== currentUser.id) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              data: { message: '只有发起人可以删除私房组合' }
+            }));
+            return;
+          }
+          
+          if (currentRoom.isLocked) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              data: { message: '投票已锁定，无法删除组合' }
+            }));
+            return;
+          }
+          
+          const result = removeCustomComboFromRoom(currentRoom, data.comboId);
+          
+          if (result.success) {
+            broadcastToRoom(currentRoom, {
+              type: 'combo_list_updated',
+              data: { combos: getRoomState(currentRoom).combos }
+            });
+          } else {
+            ws.send(JSON.stringify({
+              type: 'error',
+              data: { message: result.error }
+            }));
+          }
+          break;
+        }
+
+        case 'get_combos': {
+          if (!currentRoom) return;
+          ws.send(JSON.stringify({
+            type: 'combo_list',
+            data: { combos: getRoomState(currentRoom).combos }
+          }));
           break;
         }
 

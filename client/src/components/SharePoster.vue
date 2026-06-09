@@ -26,6 +26,7 @@
             <div class="winner-combo">
               <span class="winner-emoji">{{ combo.cakeEmoji }} + {{ combo.flowerEmoji }}</span>
               <span class="winner-name">{{ combo.cake }} & {{ combo.flower }}</span>
+              <span class="winner-price">💰 参考价 ¥{{ combo.price }}</span>
             </div>
             <div class="winner-score">
               得分 {{ combo.score > 0 ? '+' : '' }}{{ combo.score }}
@@ -79,13 +80,14 @@ function generatePosterText() {
   
   let text = `💝 情人节礼盒投票结果出炉！\n\n`
   text += `🏆 冠军组合：${winner.cake} + ${winner.flower}\n`
-  text += `📊 最终得分：${winner.score > 0 ? '+' : ''}${winner.score}\n\n`
+  text += `� 参考预算：¥${winner.price}\n`
+  text += `� 最终得分：${winner.score > 0 ? '+' : ''}${winner.score}\n\n`
   
   if (topThree.value[1]) {
-    text += `🥈 第二名：${topThree.value[1].cake} + ${topThree.value[1].flower}\n`
+    text += `🥈 第二名：${topThree.value[1].cake} + ${topThree.value[1].flower} (¥${topThree.value[1].price})\n`
   }
   if (topThree.value[2]) {
-    text += `🥉 第三名：${topThree.value[2].cake} + ${topThree.value[2].flower}\n`
+    text += `🥉 第三名：${topThree.value[2].cake} + ${topThree.value[2].flower} (¥${topThree.value[2].price})\n`
   }
   
   text += `\n💑 经过大家投票，这个情人节就选【${winner.cake} + ${winner.flower}】啦！\n`
@@ -245,6 +247,14 @@ function copyPosterText() {
   font-size: 16px;
   font-weight: 600;
   color: var(--text);
+}
+
+.winner-price {
+  font-size: 13px;
+  color: var(--primary);
+  font-weight: 500;
+  margin-top: 4px;
+  display: block;
 }
 
 .winner-score {
