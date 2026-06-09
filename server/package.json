@@ -1,0 +1,14 @@
+{
+  "name": "valentine-vote-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for Valentine's Day gift voting",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "uuid": "^9.0.1"
+  }
+}
