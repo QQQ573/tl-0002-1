@@ -80,8 +80,6 @@
         @close="showPoster = false"
       />
 
-      <ActivityPanel :activities="activities" />
-
       <div v-if="showAddModal" class="modal-overlay" @click.self="showAddModal = false">
         <div class="modal-content">
           <div class="modal-header">
@@ -119,6 +117,14 @@
       <p>连接中...</p>
       <p class="loading-tip" v-if="isReconnecting">正在重连，请稍候...</p>
     </div>
+
+    <ActivityPanel 
+      v-if="roomState"
+      :activities="activities" 
+      :max-count="50"
+      :is-last-bus="roomPhase === 'last_bus'"
+      @clear="handleClearActivities"
+    />
   </div>
 </template>
 
@@ -235,6 +241,11 @@ function showToast(msg, type = 'success') {
   toastTimer = setTimeout(() => {
     toastMessage.value = ''
   }, 2500)
+}
+
+function handleClearActivities() {
+  activities.value = []
+  showToast('已清空所有投票动态', 'success')
 }
 
 function addCustomCombo() {
@@ -548,10 +559,16 @@ onUnmounted(() => {
 }
 
 .room-content {
-  padding: 16px;
+  padding: 16px 16px 280px 16px;
   max-width: 800px;
   margin: 0 auto;
   animation: fadeIn 0.4s ease;
+}
+
+@media (min-width: 768px) {
+  .room-content {
+    padding-bottom: 16px;
+  }
 }
 
 .room-meta {

@@ -209,7 +209,8 @@ wscat -c ws://localhost:8080
 │   │   │   ├── Leaderboard.vue
 │   │   │   ├── WarningZone.vue
 │   │   │   ├── SharePoster.vue
-│   │   │   └── CustomComboForm.vue
+│   │   │   ├── CustomComboForm.vue
+│   │   │   └── ActivityPanel.vue
 │   │   ├── composables/    # 组合式函数
 │   │   │   └── useWebSocket.js
 │   │   ├── App.vue
